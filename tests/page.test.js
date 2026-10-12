@@ -7,6 +7,10 @@ const path = require('node:path')
 function loadPage(rejectSource = false, saved = {}) {
   const files = new Map([['/user/metronome-probe/old.wav', Buffer.from('stale')]])
   const events = {}
+  let systemTheme = 'light'
+  let themeCallback
+  let navigation
+  let background
   let definition
   let source
   let stored = saved
@@ -41,7 +45,7 @@ function loadPage(rejectSource = false, saved = {}) {
     },
     access: options => options.fail({ errMsg: 'not found' }),
     mkdir: options => options.success({}),
-    readdir: options => options.success({ files: [...files.keys()].map(file => path.basename(file)) }),
+    readdir: options => options.success({ files: [...files.keys()].filter(file => path.dirname(file) === options.dirPath).map(file => path.basename(file)) }),
     unlink: options => { files.delete(options.filePath); options.success({}) },
     writeFile: options => { files.set(options.filePath, Buffer.from(options.data)); options.success({}) },
     appendFile: options => {
@@ -54,6 +58,8 @@ function loadPage(rejectSource = false, saved = {}) {
     Date: TestDate, setInterval: callback => { timers.set(++nextTimer, callback); return nextTimer },
     clearInterval: id => timers.delete(id),
     wx: { env: { USER_DATA_PATH: '/user' }, getFileSystemManager: () => nativeFs, getBackgroundAudioManager: () => audio,
+      getAppBaseInfo: () => ({ theme: systemTheme }), onThemeChange: callback => { themeCallback = callback },
+      setNavigationBarColor: options => { navigation = options }, setBackgroundColor: options => { background = options },
       getStorageSync: () => stored, setStorageSync: (key, value) => { stored = value },
       showModal: options => {
         assert.ok(options.confirmText.length <= 4)
@@ -68,6 +74,8 @@ function loadPage(rejectSource = false, saved = {}) {
   }
   const page = createPage()
   return { page, files, events, audio, createPage, nativeFs, getSource: () => source,
+    setSystemTheme: theme => { systemTheme = theme; if (themeCallback) themeCallback({ theme }) },
+    getNavigation: () => navigation, getBackground: () => background,
     timers, tick: milliseconds => { now += milliseconds; for (const callback of timers.values()) callback() },
     getSaved: () => stored, setConfirm: value => { confirm = value }, getStopCount: () => stopCount }
 }
@@ -108,14 +116,15 @@ test('native local-file rejection stays visible and can be cleaned', async () =>
   assert.equal(files.size, 0)
 })
 
-test('end in background defers file cleanup until returning to the foreground', async () => {
+test('end in background immediately attempts file cleanup', async () => {
   const { page, files, events } = loadPage()
   await initialize(page)
   await page.changeSetting('seconds', 60)
   await page.generateAndPlay()
   page.onHide()
   events.Ended()
-  assert.equal(files.size, 1)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(files.size, 0)
   page.onShow()
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(files.size, 0)
@@ -325,4 +334,124 @@ test('missing drum sample returns an actionable error and permits retry', async 
   nativeFs.readFile = read
   await page.generateAndPlay()
   assert.equal(page.data.state, 'playing')
+})
+
+
+test('cleanup attempts every generated file, preserves unrelated files and retries failures on entry', async () => {
+  const { page, nativeFs, files } = loadPage(false, { seconds: 60 })
+  await initialize(page)
+  await page.generateAndPlay()
+  files.set('/user/metronome-probe/partial.wav', Buffer.from('partial'))
+  files.set('/user/unrelated.txt', Buffer.from('keep'))
+  const unlink = nativeFs.unlink
+  let failedPath
+  nativeFs.unlink = options => {
+    if (!failedPath) failedPath = options.filePath
+    if (options.filePath === failedPath) options.fail({ errMsg: 'temporarily unavailable' })
+    else unlink(options)
+  }
+  await page.stopAndClean()
+  assert.equal(page.data.state, 'error')
+  assert.equal(files.size, 2)
+  assert.ok(files.has(failedPath))
+  assert.ok(files.has('/user/unrelated.txt'))
+  assert.match(page.data.cleanupStatus, /清理失败/)
+  nativeFs.unlink = unlink
+  page.onShow()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(files.size, 1)
+  assert.equal(page.data.filePath, '')
+  assert.equal(page.data.cleanupStatus, '生成文件已清理')
+})
+
+test('inactive entry, hide and unload clean residual files while paused audio is preserved', async () => {
+  const { page, createPage, files } = loadPage(false, { seconds: 60 })
+  await initialize(page)
+  for (const action of ['onShow', 'onHide', 'onUnload']) {
+    files.set('/user/metronome-probe/stale.wav', Buffer.from('stale'))
+    page[action]()
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(files.size, 0)
+  }
+  const next = createPage()
+  await initialize(next)
+  await next.generateAndPlay()
+  await next.primaryAction()
+  next.onHide()
+  next.onUnload()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(files.size, 1)
+  assert.equal(next.data.state, 'paused')
+})
+
+test('a quick hide and return still cancels generation and cleans its partial file', async () => {
+  const { page, nativeFs, files, getSource } = loadPage(false, { seconds: 60 })
+  await initialize(page)
+  const append = nativeFs.appendFile
+  nativeFs.appendFile = options => {
+    page.onHide()
+    page.onShow()
+    append(options)
+  }
+  await page.generateAndPlay()
+  assert.equal(page.data.state, 'error')
+  assert.equal(files.size, 0)
+  assert.equal(getSource(), undefined)
+})
+
+test('background cleanup failure is retained and retried after foreground return', async () => {
+  const { page, nativeFs, events, files } = loadPage(false, { seconds: 60 })
+  await initialize(page)
+  await page.generateAndPlay()
+  const unlink = nativeFs.unlink
+  nativeFs.unlink = options => options.fail({ errMsg: 'background operation unavailable' })
+  page.onHide()
+  events.Ended()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(files.size, 1)
+  nativeFs.unlink = unlink
+  page.onShow()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(files.size, 0)
+})
+
+test('theme follows system by default, fixed modes persist and never interrupt playback', async () => {
+  const { page, setSystemTheme, getSaved, getNavigation, getBackground, files, getStopCount } = loadPage(false, { seconds: 60 })
+  setSystemTheme('dark')
+  await initialize(page)
+  assert.equal(page.data.themePreference, 'system')
+  assert.equal(page.data.theme, 'dark')
+  assert.equal(getNavigation().frontColor, '#ffffff')
+  assert.equal(getBackground().backgroundColor, '#171e1b')
+  await page.generateAndPlay()
+  const stops = getStopCount()
+  page.selectTheme({ currentTarget: { dataset: { value: 'light' } } })
+  assert.equal(page.data.theme, 'light')
+  assert.equal(getNavigation().frontColor, '#000000')
+  setSystemTheme('dark')
+  assert.equal(page.data.theme, 'light')
+  page.selectTheme({ currentTarget: { dataset: { value: 'dark' } } })
+  setSystemTheme('light')
+  assert.equal(page.data.theme, 'dark')
+  assert.equal(getSaved().themePreference, 'dark')
+  page.selectTheme({ currentTarget: { dataset: { value: 'system' } } })
+  assert.equal(page.data.theme, 'light')
+  setSystemTheme('dark')
+  assert.equal(page.data.theme, 'dark')
+  assert.equal(page.data.state, 'playing')
+  assert.equal(files.size, 1)
+  assert.equal(getStopCount(), stops)
+})
+
+test('saved fixed theme restores and invalid preference falls back to system', async () => {
+  const fixed = loadPage(false, { themePreference: 'dark' })
+  await initialize(fixed.page)
+  assert.equal(fixed.page.data.theme, 'dark')
+  fixed.page.onHide()
+  fixed.page.onShow()
+  assert.equal(fixed.page.data.theme, 'dark')
+  const invalid = loadPage(false, { themePreference: 'unknown' })
+  await initialize(invalid.page)
+  assert.equal(invalid.page.data.themePreference, 'system')
+  assert.equal(invalid.page.data.theme, 'light')
 })

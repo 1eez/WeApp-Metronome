@@ -1,3 +1,4 @@
+<view class="app theme-{{theme}}">
 <view class="page">
   <view class="header">
     <view><view class="title">节拍器</view><view class="subtitle">木吉他 · 电吉他 · 每一拍都专注</view></view>
@@ -20,7 +21,7 @@
       <view class="tempo-caption">找到你的练习速度</view>
       <button class="step-button" data-step="1" bindtap="stepBpm" disabled="{{busy || bpm === 240}}" aria-label="提高 5 BPM">＋</button>
     </view>
-    <slider min="40" max="240" step="1" value="{{bpm}}" bindchange="slideBpm" disabled="{{busy}}" activeColor="#34766d" backgroundColor="#e4e7e2" block-color="#34766d" block-size="22" />
+    <slider min="40" max="240" step="1" value="{{bpm}}" bindchange="slideBpm" disabled="{{busy}}" activeColor="{{theme === 'dark' ? '#75b7a7' : '#34766d'}}" backgroundColor="{{theme === 'dark' ? '#38483f' : '#e4e7e2'}}" block-color="{{theme === 'dark' ? '#75b7a7' : '#34766d'}}" block-size="22" />
     <view class="range"><text>40</text><text>240</text></view>
   </view>
 
@@ -43,9 +44,9 @@
   </view>
 
   <view class="playback">
-    <view wx:if="{{state === 'generating'}}" class="generation"><progress percent="{{progress}}" activeColor="#34766d" stroke-width="4" border-radius="4" /><text>{{progress}}%</text></view>
+    <view wx:if="{{state === 'generating'}}" class="generation"><progress percent="{{progress}}" activeColor="{{theme === 'dark' ? '#75b7a7' : '#34766d'}}" stroke-width="4" border-radius="4" /><text>{{progress}}%</text></view>
     <button class="primary" bindtap="primaryAction" disabled="{{busy || state === 'waiting'}}" loading="{{busy}}">{{busy ? '正在准备' : state === 'waiting' ? '正在连接播放器' : state === 'playing' ? '暂停练习' : state === 'paused' ? '继续练习' : state === 'error' ? '重试' : '开始练习'}}</button>
-    <button class="end-button" bindtap="stopAndClean" disabled="{{busy || !ready}}" wx:if="{{state === 'playing' || state === 'paused' || state === 'waiting'}}">结束本次练习</button>
+    <button class="primary end-button" bindtap="stopAndClean" disabled="{{busy || !ready}}" wx:if="{{state === 'playing' || state === 'paused' || state === 'waiting'}}">结束本次练习</button>
     <view class="status" aria-live="polite">{{status}}</view>
     <view class="footnote">四分音符计拍 · 播放中修改设置需重新开始</view>
   </view>
@@ -81,17 +82,27 @@
       <view class="help">预设均为 4/4，每小节循环，按选择的练习时长结束。</view>
     </block>
     <block wx:else>
+      <view class="settings-label">外观</view>
+      <view class="theme-options">
+        <button class="choice {{themePreference === 'light' ? 'selected' : ''}}" data-value="light" bindtap="selectTheme">保持浅色 <text wx:if="{{themePreference === 'light'}}">✓</text></button>
+        <button class="choice {{themePreference === 'dark' ? 'selected' : ''}}" data-value="dark" bindtap="selectTheme">保持深色 <text wx:if="{{themePreference === 'dark'}}">✓</text></button>
+        <button class="choice {{themePreference === 'system' ? 'selected' : ''}}" data-value="system" bindtap="selectTheme">跟随系统 <text wx:if="{{themePreference === 'system'}}">✓</text></button>
+      </view>
+      <view class="help">默认跟随系统；切换外观不会中断练习。</view>
       <view class="help">适用于木吉他和电吉他练习。上次设置会保存在本机。</view>
       <view class="help">听到声音后可以锁屏练习。来电、其他音频或强制退出微信可能中断播放。</view>
       <view class="help">圆点的外圈标记当前播放拍，暂停或锁屏时停止动画，回到前台重新对齐。画面仅作辅助，以声音为准。修改参数后，重新开始会按完整时长播放。</view>
+      <view class="help">结束练习后自动清理生成音频。播放或暂停时保留文件用于继续练习；异常退出的残留会在下次进入时清理。</view>
       <button class="choice" data-panel="diagnostics" bindtap="openPanel">{{panel === 'diagnostics' ? '诊断信息' : '查看诊断信息'}} ›</button>
       <block wx:if="{{panel === 'diagnostics'}}">
         <view class="diagnostics">
-          <view>{{status}}</view><view wx:if="{{filePath}}">{{filePath}}</view>
+          <view>{{status}}</view><view>{{cleanupStatus}}</view><view wx:if="{{filePath}}">{{filePath}}</view>
           <view class="log" wx:for="{{logs}}" wx:key="id">{{item.text}}</view>
         </view>
         <button class="choice" bindtap="stopAndClean" disabled="{{busy || !ready}}">停止并清理音频文件</button>
       </block>
     </block>
   </view>
+</view>
+
 </view>

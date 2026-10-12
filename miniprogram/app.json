@@ -4,11 +4,13 @@
   ],
   "window": {
     "navigationBarTitleText": "节拍器",
-    "navigationBarBackgroundColor": "#f8f9f5",
-    "backgroundColor": "#f8f9f5",
-    "navigationBarTextStyle": "black"
+    "navigationBarBackgroundColor": "@backgroundColor",
+    "backgroundColor": "@backgroundColor",
+    "navigationBarTextStyle": "@navigationBarTextStyle"
   },
   "requiredBackgroundModes": [
     "audio"
-  ]
+  ],
+  "darkmode": true,
+  "themeLocation": "theme.json"
 }
