@@ -12,21 +12,33 @@ function loadPage(rejectSource = false, saved = {}) {
   let stored = saved
   let confirm = false
   let stopCount = 0
+  let now = 0
+  let nextTimer = 0
+  const timers = new Map()
+  class TestDate extends Date { static now() { return now } }
   const audio = {
     paused: true,
+    currentTime: 0,
     stop() { stopCount++; this.paused = true; if (events.Stop) events.Stop() },
     pause() { this.paused = true; events.Pause() },
     play() { this.paused = false; events.Play() },
     set src(value) {
       source = value
+      this.currentTime = 0
       if (rejectSource) events.Error({ errCode: 10003, errMsg: 'local file rejected' })
       else { this.paused = false; events.Play() }
     }
   }
-  for (const event of ['Play', 'Pause', 'Stop', 'Ended', 'Error', 'Waiting']) {
+  for (const event of ['Play', 'Pause', 'Stop', 'Ended', 'Error', 'Waiting', 'TimeUpdate', 'Seeking', 'Seeked']) {
     audio[`on${event}`] = callback => { events[event] = callback }
   }
   const nativeFs = {
+    readFile: options => {
+      try {
+        const data = fs.readFileSync(path.join(__dirname, '../miniprogram', options.filePath))
+        options.success({ data: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) })
+      } catch (error) { options.fail(error) }
+    },
     access: options => options.fail({ errMsg: 'not found' }),
     mkdir: options => options.success({}),
     readdir: options => options.success({ files: [...files.keys()].map(file => path.basename(file)) }),
@@ -39,6 +51,8 @@ function loadPage(rejectSource = false, saved = {}) {
     stat: options => options.success({ stats: { size: files.get(options.path).length } })
   }
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../miniprogram/pages/index/index.js'), 'utf8'), {
+    Date: TestDate, setInterval: callback => { timers.set(++nextTimer, callback); return nextTimer },
+    clearInterval: id => timers.delete(id),
     wx: { env: { USER_DATA_PATH: '/user' }, getFileSystemManager: () => nativeFs, getBackgroundAudioManager: () => audio,
       getStorageSync: () => stored, setStorageSync: (key, value) => { stored = value },
       showModal: options => {
@@ -47,13 +61,14 @@ function loadPage(rejectSource = false, saved = {}) {
         options.success({ confirm })
       }, showToast: () => {} },
     Page: page => { definition = page },
-    require: () => require('../miniprogram/utils/wav')
+    require: name => require(path.join(__dirname, '../miniprogram/pages/index', name))
   })
   function createPage() {
     return { ...definition, data: { ...definition.data }, setData(update) { Object.assign(this.data, update) } }
   }
   const page = createPage()
   return { page, files, events, audio, createPage, nativeFs, getSource: () => source,
+    timers, tick: milliseconds => { now += milliseconds; for (const callback of timers.values()) callback() },
     getSaved: () => stored, setConfirm: value => { confirm = value }, getStopCount: () => stopCount }
 }
 
@@ -211,4 +226,103 @@ test('existing audio directory does not fail initialization', async () => {
   nativeFs.mkdir = options => options.fail({ errMsg: 'file already exists' })
   await initialize(page)
   assert.equal(page.data.state, 'idle')
+})
+
+
+test('BPM header save shares validation and +/- changes by five within bounds', async () => {
+  const { page, getSaved } = loadPage()
+  await initialize(page)
+  await page.stepBpm({ currentTarget: { dataset: { step: 1 } } })
+  assert.equal(page.data.bpm, 125)
+  await page.stepBpm({ currentTarget: { dataset: { step: -1 } } })
+  assert.equal(page.data.bpm, 120)
+  await page.openPanel({ currentTarget: { dataset: { panel: 'bpm' } } })
+  page.inputBpm({ detail: { value: '241' } })
+  await page.panelAction()
+  assert.equal(page.data.panel, 'bpm')
+  page.inputBpm({ detail: { value: '238' } })
+  await page.panelAction()
+  assert.equal(page.data.panel, '')
+  assert.equal(getSaved().bpm, 238)
+  await page.stepBpm({ currentTarget: { dataset: { step: 1 } } })
+  assert.equal(page.data.bpm, 240)
+  await page.changeSetting('bpm', 42)
+  await page.stepBpm({ currentTarget: { dataset: { step: -1 } } })
+  assert.equal(page.data.bpm, 40)
+})
+
+test('beat marker follows progress, interpolates, and stops on pause/hide/seek/end', async () => {
+  const { page, audio, events, tick, timers } = loadPage(false, { seconds: 60 })
+  await initialize(page)
+  await page.generateAndPlay()
+  assert.equal(page.data.currentBeat, 0)
+  tick(500)
+  assert.equal(page.data.currentBeat, 1)
+  audio.currentTime = 1.5
+  events.TimeUpdate()
+  assert.equal(page.data.currentBeat, 3)
+  tick(500)
+  assert.equal(page.data.currentBeat, 0)
+  audio.pause()
+  assert.equal(page.data.currentBeat, -1)
+  assert.equal(timers.size, 0)
+  audio.currentTime = 2.5
+  audio.play()
+  assert.equal(page.data.currentBeat, 1)
+  events.Seeking()
+  assert.equal(page.data.currentBeat, -1)
+  audio.currentTime = 4.5
+  events.Seeked()
+  assert.equal(page.data.currentBeat, 1)
+  page.onHide()
+  assert.equal(timers.size, 0)
+  audio.currentTime = 8
+  page.onShow()
+  assert.equal(page.data.currentBeat, 0)
+  events.Waiting()
+  assert.equal(page.data.currentBeat, -1)
+  audio.currentTime = 8.5
+  events.TimeUpdate()
+  assert.equal(page.data.currentBeat, 1)
+  events.Ended()
+  assert.equal(page.data.currentBeat, -1)
+  assert.equal(timers.size, 0)
+  await new Promise(resolve => setImmediate(resolve))
+})
+
+test('drum mode confirms meter changes, loads bundled samples and remembers selections', async () => {
+  const { page, setConfirm, files, getSource, getSaved } = loadPage(false, { seconds: 60, beats: 3 })
+  await initialize(page)
+  await page.changeSetting('mode', 'drums')
+  assert.equal(page.data.mode, 'metronome')
+  assert.equal(page.data.beats, 3)
+  setConfirm(true)
+  await page.changeSetting('mode', 'drums')
+  assert.equal(page.data.beats, 4)
+  await page.changeSetting('kit', '808')
+  await page.changeSetting('pattern', 'rock')
+  await page.generateAndPlay()
+  assert.equal(page.data.state, 'playing')
+  assert.equal(getSaved().kit, '808')
+  assert.equal(getSaved().pattern, 'rock')
+  const { createDrumRenderer, decodeSample, kits } = require('../miniprogram/utils/drums')
+  const samples = {}
+  for (const [instrument, name] of Object.entries(kits[1].files)) {
+    const file = fs.readFileSync(path.join(__dirname, '../miniprogram/assets/drums', name + '.wav'))
+    samples[instrument] = decodeSample(file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength))
+  }
+  assert.deepEqual(files.get(getSource()).subarray(44, 44 + 44100), Buffer.from(createDrumRenderer(120, 'rock', samples)(0)))
+})
+
+test('missing drum sample returns an actionable error and permits retry', async () => {
+  const { page, nativeFs, files } = loadPage(false, { seconds: 60, mode: 'drums' })
+  await initialize(page)
+  const read = nativeFs.readFile
+  nativeFs.readFile = options => options.fail({ errMsg: 'missing asset' })
+  await page.generateAndPlay()
+  assert.equal(page.data.state, 'error')
+  assert.equal(files.size, 0)
+  nativeFs.readFile = read
+  await page.generateAndPlay()
+  assert.equal(page.data.state, 'playing')
 })
