@@ -26,18 +26,20 @@ function createHeader(seconds) {
 }
 
 // 每次只生成一秒；拍点由绝对采样位置决定，不依赖生成耗时。
-function createSecond(second) {
+function createSecond(second, { bpm = BPM, beats = 4, accent = true, tone = 'electronic' } = {}) {
   const buffer = new ArrayBuffer(SAMPLE_RATE * BYTES_PER_SAMPLE)
   const view = new DataView(buffer)
-  const samplesPerBeat = SAMPLE_RATE * 60 / BPM
+  const samplesPerBeat = SAMPLE_RATE * 60 / bpm
   for (let i = 0; i < SAMPLE_RATE; i++) {
     const position = second * SAMPLE_RATE + i
-    const beat = Math.floor(position / samplesPerBeat)
+    // Round each absolute beat position separately to avoid cumulative drift.
+    const beat = Math.floor((position + 0.5) / samplesPerBeat)
     const time = (position - Math.round(beat * samplesPerBeat)) / SAMPLE_RATE
     let value = 0
     if (time >= 0 && time < 0.04) {
-      const frequency = beat % 4 === 0 ? 1500 : 1000
-      value = 0.65 * Math.sin(2 * Math.PI * frequency * time) * Math.exp(-time * 130)
+      const strong = accent && beat % beats === 0
+      const frequency = tone === 'soft' ? (strong ? 880 : 660) : (strong ? 1500 : 1000)
+      value = (tone === 'soft' ? 0.5 : 0.65) * Math.sin(2 * Math.PI * frequency * time) * Math.exp(-time * (tone === 'soft' ? 90 : 130))
     }
     view.setInt16(i * BYTES_PER_SAMPLE, Math.round(value * 32767), true)
   }

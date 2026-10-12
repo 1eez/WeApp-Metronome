@@ -1,17 +1,75 @@
 <view class="page">
-  <view class="title">本地 WAV → 后台播放器</view>
-  <view class="description">120 BPM · 4/4 · 第一拍高音重音</view>
-  <view class="description">纯前端合成，不下载、不上传音频。</view>
+  <view class="header">
+    <view><view class="title">节拍器</view><view class="subtitle">木吉他 · 电吉他 · 每一拍都专注</view></view>
+    <button class="settings-button" data-panel="settings" bindtap="openPanel">设置</button>
+  </view>
 
-  <picker range="{{durations}}" range-key="label" value="{{durationIndex}}" bindchange="changeDuration" disabled="{{busy || active}}">
-    <view class="picker">验证时长：{{durations[durationIndex].label}} ▾</view>
-  </picker>
-  <button type="primary" bindtap="generateAndPlay" disabled="{{busy || active || !ready}}">生成本地文件并尝试后台播放</button>
-  <button bindtap="stopAndClean" disabled="{{busy || !ready}}">停止并清理文件</button>
+  <view class="tempo">
+    <view class="beat-dots" aria-label="{{beats}} 拍，首拍重音{{accent ? '开启' : '关闭'}}">
+      <view wx:for="{{beatDots}}" wx:key="*this" class="dot {{index === 0 && accent ? 'accent' : ''}}"></view>
+    </view>
+    <button class="bpm-number" data-panel="bpm" bindtap="openPanel" disabled="{{busy}}">{{bpm}}</button>
+    <view class="bpm-label">BPM · 点击数字输入</view>
+    <view class="tempo-controls">
+      <button class="step-button" data-step="-1" bindtap="stepBpm" disabled="{{busy || bpm === 40}}" aria-label="降低速度">−</button>
+      <view class="tempo-caption">找到你的练习速度</view>
+      <button class="step-button" data-step="1" bindtap="stepBpm" disabled="{{busy || bpm === 240}}" aria-label="提高速度">＋</button>
+    </view>
+    <slider min="40" max="240" step="1" value="{{bpm}}" bindchange="slideBpm" disabled="{{busy}}" activeColor="#34766d" backgroundColor="#e4e7e2" block-color="#34766d" block-size="22" />
+    <view class="range"><text>40</text><text>240</text></view>
+  </view>
 
-  <view class="status">{{status}}</view>
-  <view wx:if="{{filePath}}" class="path">{{filePath}}</view>
-  <view class="hint">听到声音后锁屏。1 分钟用于确认能否播放；10 分钟用于检查持续播放。播放结束后请回到此页清理文件。</view>
-  <view class="hint">锁屏时界面与日志可能暂停更新，不能用日志时间判断节拍精度。来电、其他音频和强制退出微信可能中断播放。</view>
-  <view class="log" wx:for="{{logs}}" wx:key="id">{{item.text}}</view>
+  <view class="options">
+    <view class="option-pair">
+      <button class="option" data-panel="beats" bindtap="openPanel" disabled="{{busy}}"><text class="label">拍号</text><text class="value">{{beats}}/4 <text class="chevron">›</text></text></button>
+      <button class="option" data-panel="tone" bindtap="openPanel" disabled="{{busy}}"><text class="label">音色</text><text class="value">{{tone === 'soft' ? '柔和' : '电子'}} <text class="chevron">›</text></text></button>
+    </view>
+    <button class="option full" bindtap="toggleAccent" disabled="{{busy}}"><text class="label">首拍重音</text><text class="toggle {{accent ? 'enabled' : ''}}">{{accent ? '已开启' : '已关闭'}}</text></button>
+    <button class="option full" data-panel="seconds" bindtap="openPanel" disabled="{{busy}}"><text class="label">练习时长</text><text class="value">{{seconds / 60}} 分钟 <text class="chevron">›</text></text></button>
+  </view>
+
+  <view class="playback">
+    <view wx:if="{{state === 'generating'}}" class="generation"><progress percent="{{progress}}" activeColor="#34766d" stroke-width="4" border-radius="4" /><text>{{progress}}%</text></view>
+    <button class="primary" bindtap="primaryAction" disabled="{{busy || state === 'waiting'}}" loading="{{busy}}">{{busy ? '正在准备' : state === 'waiting' ? '正在连接播放器' : state === 'playing' ? '暂停练习' : state === 'paused' ? '继续练习' : state === 'error' ? '重试' : '开始练习'}}</button>
+    <button class="end-button" bindtap="stopAndClean" disabled="{{busy || !ready}}" wx:if="{{state === 'playing' || state === 'paused' || state === 'waiting'}}">结束本次练习</button>
+    <view class="status" aria-live="polite">{{status}}</view>
+    <view class="footnote">四分音符计拍 · 播放中修改设置需重新开始</view>
+  </view>
+</view>
+
+<view wx:if="{{panel}}" class="overlay" bindtap="closePanel">
+  <view class="sheet" catchtap="preventClose">
+    <view class="sheet-header"><text>{{panel === 'bpm' ? '练习速度' : panel === 'beats' ? '选择拍号' : panel === 'tone' ? '选择音色' : panel === 'seconds' ? '练习时长' : '设置与帮助'}}</text><button class="close" bindtap="closePanel">关闭</button></view>
+    <block wx:if="{{panel === 'bpm'}}">
+      <input class="bpm-input" type="number" maxlength="3" value="{{bpmInput}}" bindinput="inputBpm" bindconfirm="confirmBpm" focus="{{panel === 'bpm'}}" confirm-type="done" adjust-position="true" />
+      <view class="help">输入 40–240 的整数 BPM</view>
+      <button class="primary" bindtap="confirmBpm">确定</button>
+    </block>
+    <block wx:elif="{{panel === 'beats'}}">
+      <button wx:for="{{[2, 3, 4]}}" wx:key="*this" class="choice {{beats === item ? 'selected' : ''}}" data-key="beats" data-value="{{item}}" bindtap="selectOption">{{item}}/4 <text wx:if="{{beats === item}}">✓</text></button>
+      <view class="help">BPM 以四分音符计拍，圆点表示每小节拍数。</view>
+    </block>
+    <block wx:elif="{{panel === 'tone'}}">
+      <button class="choice {{tone === 'electronic' ? 'selected' : ''}}" data-key="tone" data-value="electronic" bindtap="selectOption">电子 <text wx:if="{{tone === 'electronic'}}">✓</text></button>
+      <button class="choice {{tone === 'soft' ? 'selected' : ''}}" data-key="tone" data-value="soft" bindtap="selectOption">柔和 <text wx:if="{{tone === 'soft'}}">✓</text></button>
+      <view class="help">两种音色均为提示音。音量请使用手机音量键调整。</view>
+    </block>
+    <block wx:elif="{{panel === 'seconds'}}">
+      <button wx:for="{{[60, 300, 600]}}" wx:key="*this" class="choice {{seconds === item ? 'selected' : ''}}" data-key="seconds" data-value="{{item}}" bindtap="selectOption">{{item / 60}} 分钟 <text wx:if="{{seconds === item}}">✓</text></button>
+      <view class="help">到时自动结束。开始前请保持前台，等待音频准备完成。</view>
+    </block>
+    <block wx:else>
+      <view class="help">适用于木吉他和电吉他练习。上次设置会保存在本机。</view>
+      <view class="help">听到声音后可以锁屏练习。来电、其他音频或强制退出微信可能中断播放。</view>
+      <view class="help">圆点表示拍号，不是实时节拍动画。修改参数后，重新开始会按完整时长播放。</view>
+      <button class="choice" data-panel="diagnostics" bindtap="openPanel">{{panel === 'diagnostics' ? '诊断信息' : '查看诊断信息'}} ›</button>
+      <block wx:if="{{panel === 'diagnostics'}}">
+        <view class="diagnostics">
+          <view>{{status}}</view><view wx:if="{{filePath}}">{{filePath}}</view>
+          <view class="log" wx:for="{{logs}}" wx:key="id">{{item.text}}</view>
+        </view>
+        <button class="choice" bindtap="stopAndClean" disabled="{{busy || !ready}}">停止并清理音频文件</button>
+      </block>
+    </block>
+  </view>
 </view>

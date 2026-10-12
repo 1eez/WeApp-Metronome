@@ -1,8 +1,14 @@
 {
-  "pages": ["pages/index/index"],
+  "pages": [
+    "pages/index/index"
+  ],
   "window": {
-    "navigationBarTitleText": "节拍器 · 音频验证",
-    "navigationBarBackgroundColor": "#f5f5f5"
+    "navigationBarTitleText": "节拍器",
+    "navigationBarBackgroundColor": "#f8f9f5",
+    "backgroundColor": "#f8f9f5",
+    "navigationBarTextStyle": "black"
   },
-  "requiredBackgroundModes": ["audio"]
+  "requiredBackgroundModes": [
+    "audio"
+  ]
 }
