@@ -1,0 +1,22 @@
+# WeChat developer tool personal settings
+project.private.config.json
+
+# Local secrets and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Third-party samples: prepare locally, do not redistribute
+/miniprogram/assets/drums/*.wav
+/\[99Sounds\]*.zip
+
+# Local dependencies, caches and logs
+node_modules/
+__pycache__/
+*.pyc
+*.log
+.DS_Store
