@@ -1,5 +1,5 @@
 {
-  "appid": "touristappid",
+  "appid": "wxef25334b780f0cbf",
   "projectname": "metronome-audio-probe",
   "compileType": "miniprogram",
   "miniprogramRoot": "miniprogram/",
@@ -32,5 +32,6 @@
     "ignore": [],
     "include": []
   },
-  "editorSetting": {}
+  "editorSetting": {},
+  "libVersion": "3.17.4"
 }
