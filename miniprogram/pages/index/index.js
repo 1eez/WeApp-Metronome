@@ -1,11 +1,11 @@
-const { createHeader, createSecond } = require('../../utils/wav')
+const { SAMPLE_RATE, createHeader, createSecond } = require('../../utils/wav')
 const { kits, patterns, decodeSample, createDrumRenderer } = require('../../utils/drums')
 const fs = wx.getFileSystemManager()
 const directory = `${wx.env.USER_DATA_PATH}/metronome-probe`
 const storageKey = 'metronome-settings'
 const defaults = { bpm: 120, beats: 4, accent: true, tone: 'electronic', seconds: 600, mode: 'metronome', kit: 'acoustic', pattern: 'basic', themePreference: 'system' }
 // Keep the session alive when the page is recreated; audio callbacks are registered once.
-const session = { page: null, audio: null, data: null, visible: false, needsCleanup: false, beatTimer: null, clock: null, samples: {}, generationCancelled: false }
+const session = { page: null, audio: null, data: null, visible: false, needsCleanup: false, beatTimer: null, clock: null, samples: {}, generationCancelled: false, writerFd: null }
 
 function update(values) {
   Object.assign(session.data, values)
@@ -46,7 +46,7 @@ function log(message) {
 function saveSettings() {
   const settings = {}
   for (const name of Object.keys(defaults)) settings[name] = session.data[name]
-  try { wx.setStorageSync(storageKey, settings) } catch (error) { log(`保存设置失败：${JSON.stringify(error)}`) }
+  try { wx.setStorageSync(storageKey, settings) } catch (error) { log(`保存设置失败：${JSON.stringify({ message: error.message, ...error })}`) }
 }
 function applyTheme(systemTheme = wx.getAppBaseInfo().theme) {
   const theme = session.data.themePreference === 'system' ? (systemTheme === 'dark' ? 'dark' : 'light') : session.data.themePreference
@@ -56,16 +56,56 @@ function applyTheme(systemTheme = wx.getAppBaseInfo().theme) {
   wx.setBackgroundColor({ backgroundColor, backgroundColorTop: backgroundColor, backgroundColorBottom: backgroundColor })
 }
 function hasActiveAudio() { return ['playing', 'paused', 'waiting'].includes(session.data.state) }
+async function closeWriter() {
+  if (session.writerFd === null) return
+  await fileOperation('close', { fd: session.writerFd })
+  session.writerFd = null
+}
+async function writeChunk(data, position) {
+  let offset = 0
+  while (offset < data.byteLength) {
+    const { bytesWritten } = await fileOperation('write', { fd: session.writerFd, data, offset, length: data.byteLength - offset, position: position + offset })
+    if (!Number.isInteger(bytesWritten) || bytesWritten <= 0 || bytesWritten > data.byteLength - offset) throw new Error('音频文件写入不完整')
+    offset += bytesWritten
+  }
+}
+async function refreshStorage() {
+  let totalBytes = 0
+  let generatedBytes = 0
+  let generatedCount = 0
+  async function scan(dirPath) {
+    const { files } = await fileOperation('readdir', { dirPath })
+    for (const name of files) {
+      const path = `${dirPath}/${name}`
+      const { stats } = await fileOperation('stat', { path })
+      if (stats.isDirectory()) await scan(path)
+      else {
+        totalBytes += stats.size
+        if (path.startsWith(`${directory}/`)) { generatedBytes += stats.size; generatedCount++ }
+      }
+    }
+  }
+  try {
+    await scan(wx.env.USER_DATA_PATH)
+    update({ storageStatus: `生成文件：${generatedCount} 个 / ${generatedBytes} 字节；用户目录总占用：${totalBytes} 字节` })
+  } catch (error) {
+    update({ storageStatus: `占用检查失败：${JSON.stringify({ message: error.message, ...error })}` })
+  }
+}
 async function cleanFiles() {
   session.needsCleanup = true
   update({ cleanupStatus: '正在清理生成文件…' })
+  await closeWriter()
   const { files } = await fileOperation('readdir', { dirPath: directory })
   let failure
   for (const name of files) {
     try { await fileOperation('unlink', { filePath: `${directory}/${name}` }) }
     catch (error) { failure = error }
   }
+  await refreshStorage()
   if (failure) throw failure
+  const remaining = await fileOperation('readdir', { dirPath: directory })
+  if (remaining.files.length) throw new Error(`仍有 ${remaining.files.length} 个生成文件未清理`)
   session.needsCleanup = false
   update({ filePath: '', cleanupStatus: '生成文件已清理' })
 }
@@ -76,7 +116,7 @@ async function cleanup() {
   try {
     await cleanFiles()
   } catch (error) {
-    log(`清理失败：${JSON.stringify(error)}`)
+    log(`清理失败：${JSON.stringify({ message: error.message, ...error })}`)
     update({ cleanupStatus: '清理失败，重新进入时自动重试，也可手动清理', status: '文件清理失败，请在设置中重试', state: 'error' })
   } finally {
     update({ busy: false })
@@ -94,7 +134,7 @@ Page({
     ...defaults, kits, patterns, kitLabel: kits[0].label, patternLabel: patterns[0].label,
     currentBeat: -1, beatDots: [0, 1, 2, 3], ready: false, busy: false,
     state: 'idle', filePath: '', status: '正在准备…', progress: 0,
-    panel: '', bpmInput: '120', logs: [], theme: 'light', cleanupStatus: '等待清理检查'
+    panel: '', bpmInput: '120', logs: [], theme: 'light', cleanupStatus: '等待清理检查', storageStatus: '等待占用检查'
   },
   onLoad() {
     session.page = this
@@ -116,9 +156,8 @@ Page({
         pattern: patterns.some(item => item.id === saved.pattern) ? saved.pattern : defaults.pattern,
         themePreference: ['light', 'dark', 'system'].includes(saved.themePreference) ? saved.themePreference : defaults.themePreference
       }
-      if (settings.mode === 'drums') settings.beats = 4
       update({ ...settings, kitLabel: kits.find(item => item.id === settings.kit).label, patternLabel: patterns.find(item => item.id === settings.pattern).label, beatDots: Array.from({ length: settings.beats }, (_, i) => i) })
-    } catch (error) { log(`读取设置失败：${JSON.stringify(error)}`) }
+    } catch (error) { log(`读取设置失败：${JSON.stringify({ message: error.message, ...error })}`) }
     wx.onThemeChange(({ theme }) => applyTheme(theme))
     const audio = session.audio = wx.getBackgroundAudioManager()
     audio.onPlay(() => {
@@ -145,7 +184,7 @@ Page({
     audio.onError(error => {
       stopBeatDisplay()
       update({ state: 'error', status: '播放失败，请重试或查看诊断信息' })
-      log(`onError ${JSON.stringify(error)}`)
+      log(`onError ${JSON.stringify({ message: error.message, ...error })}`)
       session.needsCleanup = true
       cleanup()
     })
@@ -177,7 +216,7 @@ Page({
       await cleanFiles()
       update({ ready: true, state: 'idle', status: '就绪 · 选好节奏，开始练习' })
     } catch (error) {
-      log(JSON.stringify(error))
+      log(JSON.stringify({ message: error.message, ...error }))
       update({ state: 'error', status: '文件准备失败，点击重试', cleanupStatus: '准备失败，残留文件将在重试时再次清理' })
     } finally { update({ busy: false }) }
   },
@@ -192,23 +231,24 @@ Page({
   },
   onHide() { leavePage() },
   onUnload() { leavePage(); session.page = null },
-  async allowEdit(forceMeter = false) {
+  async allowEdit() {
     if (session.data.busy) return false
     const active = ['playing', 'paused', 'waiting'].includes(session.data.state)
-    if (!active && !forceMeter) return true
+    if (!active) return true
     const result = await new Promise(resolve => wx.showModal({
-      title: active ? '结束当前练习？' : '切换到 4/4 拍？',
-      content: (forceMeter ? '鼓伴奏使用 4/4 拍。' : '') + (active ? '修改设置需要停止当前音频，重新开始后将按完整时长播放。' : '切换模式时将同时调整拍号。'),
-      confirmText: active ? '结束修改' : '切换', cancelText: active ? '继续播放' : '取消', success: resolve, fail: () => resolve({ confirm: false })
+      title: '结束当前练习？',
+      content: '修改设置需要停止当前音频，重新开始后将按完整时长播放。',
+      confirmText: '结束修改', cancelText: '继续播放', success: resolve, fail: () => resolve({ confirm: false })
     }))
     if (!result.confirm || session.data.busy) return false
-    if (active) await this.stopAndClean()
+    await this.stopAndClean()
     return session.data.state !== 'error'
   },
   async openPanel(event) {
     const panel = event.currentTarget.dataset.panel
     if (!['settings', 'diagnostics'].includes(panel) && !await this.allowEdit()) return
     update({ panel, bpmInput: String(session.data.bpm) })
+    if (panel === 'diagnostics') await refreshStorage()
   },
   async panelAction() {
     if (session.data.panel === 'bpm') await this.confirmBpm()
@@ -236,9 +276,7 @@ Page({
   async toggleAccent() { await this.changeSetting('accent', !session.data.accent) },
   async changeSetting(key, value) {
     if (session.data[key] === value) { update({ panel: '' }); return }
-    const forceMeter = key === 'mode' && value === 'drums' && session.data.beats !== 4
-    if (!await this.allowEdit(forceMeter)) { update({ bpm: session.data.bpm }); return }
-    if (forceMeter) update({ beats: 4 })
+    if (!await this.allowEdit()) { update({ bpm: session.data.bpm }); return }
     update({ [key]: value, panel: '', beatDots: Array.from({ length: key === 'beats' ? value : session.data.beats }, (_, i) => i) })
     update({ kitLabel: kits.find(item => item.id === session.data.kit).label, patternLabel: patterns.find(item => item.id === session.data.pattern).label })
     saveSettings()
@@ -279,16 +317,23 @@ Page({
           session.samples[kit] = {}
           for (const [instrument, sample] of entries) session.samples[kit][instrument] = sample
         }
-        renderSecond = createDrumRenderer(bpm, pattern, session.samples[kit])
+        renderSecond = createDrumRenderer(bpm, pattern, session.samples[kit], beats)
       }
-      await fileOperation('writeFile', { filePath, data: createHeader(seconds) })
+      log(`准备写入：${seconds} 秒，预计 ${44 + seconds * SAMPLE_RATE * 2} 字节；${session.data.storageStatus}`)
+      // DevTools appendFile can hit its storage quota after only ~2 MiB; write by position instead.
+      const { fd } = await fileOperation('open', { filePath, flag: 'w' })
+      session.writerFd = fd
+      await writeChunk(createHeader(seconds), 0)
       update({ filePath, cleanupStatus: '本次音频保留中，结束练习后清理' })
       for (let second = 0; second < seconds; second++) {
         if (session.generationCancelled || !session.visible) throw new Error('生成期间离开了页面，请回到前台重新开始')
-        await fileOperation('appendFile', { filePath, data: renderSecond(second) })
+        await writeChunk(renderSecond(second), 44 + second * SAMPLE_RATE * 2)
         if ((second + 1) % 10 === 0 || second === seconds - 1) update({ progress: Math.round((second + 1) / seconds * 100) })
       }
+      await closeWriter()
       const info = await fileOperation('stat', { path: filePath })
+      if (info.stats.size !== 44 + seconds * SAMPLE_RATE * 2) throw new Error('音频文件大小与预计不符')
+      await refreshStorage()
       log(`WAV：${info.stats.size} 字节，${bpm} BPM，${beats}/4，${seconds} 秒`)
       session.audio.title = `${mode === 'drums' ? session.data.patternLabel : '节拍器'} · ${bpm} BPM · ${beats}/4`
       session.audio.singer = mode === 'drums' ? session.data.kitLabel : tone === 'soft' ? '柔和提示音' : '电子提示音'
@@ -300,13 +345,20 @@ Page({
       session.audio.src = filePath
     } catch (error) {
       session.audio.stop()
-      log(JSON.stringify({ message: error.message, ...error }))
+      log(JSON.stringify({ message: error.message, ...error, progress: session.data.progress, filePath, storage: session.data.storageStatus }))
       update({ state: 'error', status: session.visible ? '生成失败，请重试或查看诊断信息' : '生成已中止，请保持前台重新开始' })
       session.needsCleanup = true
     } finally {
       update({ busy: false })
       if (session.needsCleanup) await cleanup()
     }
+  },
+  copyDiagnostics() {
+    const data = session.data
+    wx.setClipboardData({
+      data: [`${data.mode} · ${data.bpm} BPM · ${data.beats}/4 · ${data.seconds} 秒`, data.status, data.cleanupStatus, data.storageStatus, data.filePath, ...data.logs.map(item => item.text)].filter(Boolean).join('\n'),
+      fail: error => { log(`复制失败：${JSON.stringify({ message: error.message, ...error })}`); wx.showToast({ title: '复制失败，请重试', icon: 'none' }) }
+    })
   },
   async stopAndClean() {
     if (session.data.busy || !session.data.ready) return
@@ -316,7 +368,7 @@ Page({
       await cleanFiles()
       update({ state: 'idle', status: '已结束 · 可以调整设置或再次开始' })
     } catch (error) {
-      log(`清理失败：${JSON.stringify(error)}`)
+      log(`清理失败：${JSON.stringify({ message: error.message, ...error })}`)
       update({ state: 'error', status: '文件清理失败，请重试', cleanupStatus: '清理失败，重新进入时自动重试，也可手动清理' })
     } finally { update({ busy: false }) }
   }

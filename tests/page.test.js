@@ -13,6 +13,9 @@ function loadPage(rejectSource = false, saved = {}) {
   let background
   let definition
   let source
+  let clipboard
+  let nextFd = 0
+  const descriptors = new Map()
   let stored = saved
   let confirm = false
   let stopCount = 0
@@ -45,14 +48,26 @@ function loadPage(rejectSource = false, saved = {}) {
     },
     access: options => options.fail({ errMsg: 'not found' }),
     mkdir: options => options.success({}),
-    readdir: options => options.success({ files: [...files.keys()].filter(file => path.dirname(file) === options.dirPath).map(file => path.basename(file)) }),
+    readdir: options => options.success({ files: [...new Set([...files.keys()].filter(file => file.startsWith(options.dirPath + '/')).map(file => file.slice(options.dirPath.length + 1).split('/')[0]))] }),
     unlink: options => { files.delete(options.filePath); options.success({}) },
-    writeFile: options => { files.set(options.filePath, Buffer.from(options.data)); options.success({}) },
-    appendFile: options => {
-      files.set(options.filePath, Buffer.concat([files.get(options.filePath), Buffer.from(options.data)]))
-      options.success({})
+    open: options => {
+      const fd = String(++nextFd)
+      descriptors.set(fd, options.filePath)
+      files.set(options.filePath, Buffer.alloc(0))
+      options.success({ fd })
     },
-    stat: options => options.success({ stats: { size: files.get(options.path).length } })
+    write: options => {
+      const filePath = descriptors.get(options.fd)
+      assert.ok(filePath, 'write requires an open descriptor')
+      const previous = files.get(filePath)
+      const file = Buffer.alloc(Math.max(previous.length, options.position + options.length))
+      previous.copy(file)
+      Buffer.from(options.data).copy(file, options.position, options.offset, options.offset + options.length)
+      files.set(filePath, file)
+      options.success({ bytesWritten: options.length })
+    },
+    close: options => { descriptors.delete(options.fd); options.success({}) },
+    stat: options => options.success({ stats: { size: files.get(options.path)?.length || 0, isDirectory: () => !files.has(options.path) } })
   }
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../miniprogram/pages/index/index.js'), 'utf8'), {
     Date: TestDate, setInterval: callback => { timers.set(++nextTimer, callback); return nextTimer },
@@ -61,6 +76,7 @@ function loadPage(rejectSource = false, saved = {}) {
       getAppBaseInfo: () => ({ theme: systemTheme }), onThemeChange: callback => { themeCallback = callback },
       setNavigationBarColor: options => { navigation = options }, setBackgroundColor: options => { background = options },
       getStorageSync: () => stored, setStorageSync: (key, value) => { stored = value },
+      setClipboardData: options => { clipboard = options.data },
       showModal: options => {
         assert.ok(options.confirmText.length <= 4)
         assert.ok(options.cancelText.length <= 4)
@@ -73,7 +89,7 @@ function loadPage(rejectSource = false, saved = {}) {
     return { ...definition, data: { ...definition.data }, setData(update) { Object.assign(this.data, update) } }
   }
   const page = createPage()
-  return { page, files, events, audio, createPage, nativeFs, getSource: () => source,
+  return { page, files, events, audio, createPage, nativeFs, descriptors, getClipboard: () => clipboard, getSource: () => source,
     setSystemTheme: theme => { systemTheme = theme; if (themeCallback) themeCallback({ theme }) },
     getNavigation: () => navigation, getBackground: () => background,
     timers, tick: milliseconds => { now += milliseconds; for (const callback of timers.values()) callback() },
@@ -199,11 +215,11 @@ test('invalid saved settings fall back to defaults and invalid BPM is rejected',
 test('leaving during generation aborts safely and permits a foreground retry', async () => {
   const { page, nativeFs, files } = loadPage(false, { seconds: 60 })
   await initialize(page)
-  const append = nativeFs.appendFile
+  const write = nativeFs.write
   let leave = true
-  nativeFs.appendFile = options => {
+  nativeFs.write = options => {
     if (leave) { page.onHide(); leave = false }
-    append(options)
+    write(options)
   }
   await page.generateAndPlay()
   assert.equal(page.data.state, 'error')
@@ -218,12 +234,12 @@ test('leaving during generation aborts safely and permits a foreground retry', a
 test('generation failure cleans partial files and supports retry', async () => {
   const { page, nativeFs, files } = loadPage(false, { seconds: 60 })
   await initialize(page)
-  const append = nativeFs.appendFile
-  nativeFs.appendFile = options => options.fail({ errMsg: 'disk full' })
+  const write = nativeFs.write
+  nativeFs.write = options => options.fail({ errMsg: 'the maximum size of the file storage limit is exceeded' })
   await page.generateAndPlay()
   assert.equal(page.data.state, 'error')
   assert.equal(files.size, 0)
-  nativeFs.appendFile = append
+  nativeFs.write = write
   await page.generateAndPlay()
   assert.equal(page.data.state, 'playing')
 })
@@ -299,15 +315,12 @@ test('beat marker follows progress, interpolates, and stops on pause/hide/seek/e
   await new Promise(resolve => setImmediate(resolve))
 })
 
-test('drum mode confirms meter changes, loads bundled samples and remembers selections', async () => {
+test('drum mode preserves the selected meter, loads bundled samples and remembers selections', async () => {
   const { page, setConfirm, files, getSource, getSaved } = loadPage(false, { seconds: 60, beats: 3 })
   await initialize(page)
   await page.changeSetting('mode', 'drums')
-  assert.equal(page.data.mode, 'metronome')
+  assert.equal(page.data.mode, 'drums')
   assert.equal(page.data.beats, 3)
-  setConfirm(true)
-  await page.changeSetting('mode', 'drums')
-  assert.equal(page.data.beats, 4)
   await page.changeSetting('kit', '808')
   await page.changeSetting('pattern', 'rock')
   await page.generateAndPlay()
@@ -320,7 +333,7 @@ test('drum mode confirms meter changes, loads bundled samples and remembers sele
     const file = fs.readFileSync(path.join(__dirname, '../miniprogram/assets/drums', name + '.wav'))
     samples[instrument] = decodeSample(file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength))
   }
-  assert.deepEqual(files.get(getSource()).subarray(44, 44 + 44100), Buffer.from(createDrumRenderer(120, 'rock', samples)(0)))
+  assert.deepEqual(files.get(getSource()).subarray(44, 44 + 44100), Buffer.from(createDrumRenderer(120, 'rock', samples, 3)(0)))
 })
 
 test('missing drum sample returns an actionable error and permits retry', async () => {
@@ -387,11 +400,11 @@ test('inactive entry, hide and unload clean residual files while paused audio is
 test('a quick hide and return still cancels generation and cleans its partial file', async () => {
   const { page, nativeFs, files, getSource } = loadPage(false, { seconds: 60 })
   await initialize(page)
-  const append = nativeFs.appendFile
-  nativeFs.appendFile = options => {
+  const write = nativeFs.write
+  nativeFs.write = options => {
     page.onHide()
     page.onShow()
-    append(options)
+    write(options)
   }
   await page.generateAndPlay()
   assert.equal(page.data.state, 'error')
@@ -454,4 +467,99 @@ test('saved fixed theme restores and invalid preference falls back to system', a
   await initialize(invalid.page)
   assert.equal(invalid.page.data.themePreference, 'system')
   assert.equal(invalid.page.data.theme, 'light')
+})
+
+
+test('diagnostics copy includes storage, settings, file and errors', async () => {
+  const { page, nativeFs, getClipboard } = loadPage(false, { seconds: 60 })
+  await initialize(page)
+  nativeFs.write = options => options.fail({ errMsg: 'the maximum size of the file storage limit is exceeded' })
+  await page.generateAndPlay()
+  await page.openPanel({ currentTarget: { dataset: { panel: 'diagnostics' } } })
+  page.copyDiagnostics()
+  assert.match(getClipboard(), /120 BPM · 4\/4 · 60 秒/)
+  assert.match(getClipboard(), /生成文件：0 个 \/ 0 字节/)
+  assert.match(getClipboard(), /maximum size/)
+  assert.match(getClipboard(), /预计 2646044 字节/)
+})
+
+test('ten-minute sessions stay bounded across repeats and close before playback and cleanup', async () => {
+  const { page, nativeFs, descriptors, files } = loadPage(false, { seconds: 600 })
+  await initialize(page)
+  const write = nativeFs.write
+  const unlink = nativeFs.unlink
+  let peak = 0
+  nativeFs.write = options => {
+    write(options)
+    const bytes = [...files.values()].reduce((total, file) => total + file.length, 0)
+    peak = Math.max(peak, bytes)
+    assert.ok(bytes <= 44 + 600 * 44100)
+  }
+  nativeFs.unlink = options => {
+    assert.equal(descriptors.size, 0)
+    unlink(options)
+  }
+  for (let i = 0; i < 4; i++) {
+    await page.generateAndPlay()
+    assert.equal(page.data.state, 'playing')
+    assert.equal(descriptors.size, 0)
+    assert.equal(files.size, 1)
+    assert.match(page.data.storageStatus, /生成文件：1 个 \/ 26460044 字节/)
+    await page.stopAndClean()
+    assert.equal(files.size, 0)
+    assert.match(page.data.storageStatus, /生成文件：0 个 \/ 0 字节/)
+  }
+  assert.equal(peak, 26460044)
+})
+
+test('short writes complete at correct positions and close failure is retried before removal', async () => {
+  const { page, nativeFs, descriptors, files, getSource } = loadPage(false, { seconds: 60 })
+  await initialize(page)
+  const write = nativeFs.write
+  nativeFs.write = options => write({ ...options, length: Math.max(1, Math.floor(options.length / 2)) })
+  await page.generateAndPlay()
+  assert.equal(page.data.state, 'playing')
+  const { createHeader, createSecond } = require('../miniprogram/utils/wav')
+  assert.deepEqual(files.get(getSource()), Buffer.concat([Buffer.from(createHeader(60)), ...Array.from({ length: 60 }, (_, second) => Buffer.from(createSecond(second)))]))
+  await page.stopAndClean()
+  const close = nativeFs.close
+  nativeFs.close = options => options.fail({ errMsg: 'close temporarily unavailable' })
+  await page.generateAndPlay()
+  assert.equal(page.data.state, 'error')
+  assert.equal(descriptors.size, 1)
+  assert.equal(files.size, 1)
+  nativeFs.close = close
+  page.onShow()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(descriptors.size, 0)
+  assert.equal(files.size, 0)
+})
+
+test('cleanup verifies removal and storage includes unrelated files without deleting them', async () => {
+  const { page, nativeFs, files } = loadPage(false, { seconds: 60 })
+  await initialize(page)
+  files.set('/user/other/cache.bin', Buffer.alloc(100))
+  files.set('/user/metronome-probe/stale.wav', Buffer.alloc(50))
+  const unlink = nativeFs.unlink
+  nativeFs.unlink = options => options.success({})
+  await page.stopAndClean()
+  assert.equal(page.data.state, 'error')
+  assert.match(page.data.logs[0].text, /仍有 1 个生成文件/)
+  assert.match(page.data.storageStatus, /用户目录总占用：150 字节/)
+  nativeFs.unlink = unlink
+  await page.stopAndClean()
+  assert.equal(files.size, 1)
+  assert.match(page.data.storageStatus, /用户目录总占用：100 字节/)
+})
+
+test('saved drum meters restore without being forced to four beats', async () => {
+  for (const beats of [2, 3, 4]) {
+    const { page, getSaved } = loadPage(false, { mode: 'drums', beats })
+    await initialize(page)
+    assert.equal(page.data.beats, beats)
+    assert.equal(page.data.beatDots.length, beats)
+    await page.changeSetting('mode', 'metronome')
+    await page.changeSetting('mode', 'drums')
+    assert.equal(getSaved().beats, beats)
+  }
 })

@@ -4,7 +4,7 @@ const kits = [
   { id: 'acoustic', label: '声学鼓', files: { kick: 'kick-acoustic01', snare: 'snare-acoustic01', hat: 'hihat-acoustic01' } },
   { id: '808', label: '808 电子鼓', files: { kick: 'kick-808', snare: 'snare-808', hat: 'hihat-808' } }
 ]
-// Positions are quarter-note beats from the start of a four-beat bar.
+// Positions are quarter-note beats; shorter meters repeat the first beats of each preset.
 const patterns = [
   { id: 'basic', label: '基础八分', description: '底鼓 1、3 拍 · 军鼓 2、4 拍 · 八分踩镲', hits: { kick: [0, 2], snare: [1, 3], hat: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5] } },
   { id: 'ballad', label: '慢速抒情', description: '底鼓 1、3 拍 · 军鼓第 3 拍 · 四分踩镲', hits: { kick: [0, 2], snare: [2], hat: [0, 1, 2, 3] } },
@@ -21,10 +21,12 @@ function decodeSample(buffer) {
   return result
 }
 
-function createDrumRenderer(bpm, patternId, samples) {
-  const pattern = patterns.find(item => item.id === patternId)
+function createDrumRenderer(bpm, patternId, samples, beats = 4) {
+  const preset = patterns.find(item => item.id === patternId)
+  const pattern = { hits: {} }
+  for (const instrument of Object.keys(preset.hits)) pattern.hits[instrument] = preset.hits[instrument].filter(hit => hit < beats)
   const samplesPerBeat = SAMPLE_RATE * 60 / bpm
-  const barLength = samplesPerBeat * 4
+  const barLength = samplesPerBeat * beats
   const instruments = Object.keys(pattern.hits)
   const gains = { kick: 0.65, snare: 0.5, hat: 0.22 }
   // Bound simultaneous sample tails across bars; use one gain for the whole track.
@@ -39,7 +41,7 @@ function createDrumRenderer(bpm, patternId, samples) {
       let count = 0
       for (let bar = -lookback; bar <= 0; bar++) {
         for (const hit of offsets) {
-          const start = Math.round((bar * 4 + hit) * samplesPerBeat)
+          const start = Math.round((bar * beats + hit) * samplesPerBeat)
           if (start <= end && end - start < duration + 1) count++
         }
       }
@@ -58,7 +60,7 @@ function createDrumRenderer(bpm, patternId, samples) {
       const lastBar = Math.floor(end / barLength)
       for (let bar = firstBar; bar <= lastBar; bar++) {
         for (const offset of pattern.hits[instrument]) {
-          const hit = Math.round((bar * 4 + offset) * samplesPerBeat)
+          const hit = Math.round((bar * beats + offset) * samplesPerBeat)
           const from = Math.max(start, hit)
           const to = Math.min(end, hit + sample.length)
           for (let position = from; position < to; position++) mix[position - start] += sample[position - hit] * gains[instrument]

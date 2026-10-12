@@ -58,3 +58,6 @@ slider { margin: 24rpx 0 12rpx; }
 
 .settings-label { font-size: 26rpx; color: var(--muted); }
 .theme-options .choice { padding: 18rpx 16rpx; }
+
+.theme-dark .overlay { background: rgba(0, 0, 0, .7); }
+.theme-dark .sheet { background: #293a31; border-top: 2rpx solid #708b7c; box-shadow: 0 -16rpx 64rpx rgba(0, 0, 0, .5); }
