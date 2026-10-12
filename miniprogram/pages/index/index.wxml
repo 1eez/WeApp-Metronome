@@ -50,6 +50,7 @@
     <view class="status" aria-live="polite">{{status}}</view>
     <view class="footnote">四分音符计拍 · 播放中修改设置需重新开始</view>
   </view>
+  <view class="author">Author: Steven · © {{year}}</view>
 </view>
 
 <view wx:if="{{panel}}" class="overlay" bindtap="closePanel">
@@ -93,14 +94,15 @@
       <view class="help">听到声音后可以锁屏练习。来电、其他音频或强制退出微信可能中断播放。</view>
       <view class="help">圆点的外圈标记当前播放拍，暂停或锁屏时停止动画，回到前台重新对齐。画面仅作辅助，以声音为准。修改参数后，重新开始会按完整时长播放。</view>
       <view class="help">结束练习后自动清理生成音频。播放或暂停时保留文件用于继续练习；异常退出的残留会在下次进入时清理。</view>
-      <button class="choice" data-panel="diagnostics" bindtap="openPanel">{{panel === 'diagnostics' ? '诊断信息' : '查看诊断信息'}} ›</button>
+      <button class="choice" data-panel="diagnostics" bindtap="openPanel">{{panel === 'diagnostics' ? '收起诊断信息' : '查看诊断信息'}} <text>{{panel === 'diagnostics' ? '⌃' : '⌄'}}</text></button>
       <block wx:if="{{panel === 'diagnostics'}}">
         <view class="diagnostics" bindtap="copyDiagnostics" aria-label="点击复制全部诊断信息">
           <view>{{status}}</view><view>{{cleanupStatus}}</view><view>{{storageStatus}}</view><view wx:if="{{filePath}}">{{filePath}}</view>
           <view class="log" wx:for="{{logs}}" wx:key="id">{{item.text}}</view>
         </view>
         <button class="choice" bindtap="copyDiagnostics">复制全部诊断信息</button>
-        <button class="choice" bindtap="stopAndClean" disabled="{{busy || !ready}}">停止并清理音频文件</button>
+        <button class="choice" bindtap="stopAndClean" disabled="{{busy || !ready}}">停止并清理全部运行数据</button>
+        <view class="help">清除生成音频、残留文件、日志和运行缓存，保留你的输入与设置。</view>
       </block>
     </block>
   </view>

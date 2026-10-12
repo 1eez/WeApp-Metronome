@@ -6,6 +6,7 @@ const path = require('node:path')
 
 function loadPage(rejectSource = false, saved = {}) {
   const files = new Map([['/user/metronome-probe/old.wav', Buffer.from('stale')]])
+  const directories = new Set(['/user', '/user/metronome-probe'])
   const events = {}
   let systemTheme = 'light'
   let themeCallback
@@ -22,7 +23,10 @@ function loadPage(rejectSource = false, saved = {}) {
   let now = 0
   let nextTimer = 0
   const timers = new Map()
-  class TestDate extends Date { static now() { return now } }
+  class TestDate extends Date {
+    constructor(...args) { super(...(args.length ? args : [now])) }
+    static now() { return now }
+  }
   const audio = {
     paused: true,
     currentTime: 0,
@@ -47,8 +51,12 @@ function loadPage(rejectSource = false, saved = {}) {
       } catch (error) { options.fail(error) }
     },
     access: options => options.fail({ errMsg: 'not found' }),
-    mkdir: options => options.success({}),
-    readdir: options => options.success({ files: [...new Set([...files.keys()].filter(file => file.startsWith(options.dirPath + '/')).map(file => file.slice(options.dirPath.length + 1).split('/')[0]))] }),
+    mkdir: options => { directories.add(options.dirPath); options.success({}) },
+    readdir: options => options.success({ files: [...new Set([...files.keys(), ...directories].filter(file => file.startsWith(options.dirPath + '/')).map(file => file.slice(options.dirPath.length + 1).split('/')[0]))] }),
+    rmdir: options => {
+      if ([...files.keys(), ...directories].some(file => file.startsWith(options.dirPath + '/'))) options.fail({ errMsg: 'directory not empty' })
+      else { directories.delete(options.dirPath); options.success({}) }
+    },
     unlink: options => { files.delete(options.filePath); options.success({}) },
     open: options => {
       const fd = String(++nextFd)
@@ -89,7 +97,7 @@ function loadPage(rejectSource = false, saved = {}) {
     return { ...definition, data: { ...definition.data }, setData(update) { Object.assign(this.data, update) } }
   }
   const page = createPage()
-  return { page, files, events, audio, createPage, nativeFs, descriptors, getClipboard: () => clipboard, getSource: () => source,
+  return { page, files, directories, events, audio, createPage, nativeFs, descriptors, getClipboard: () => clipboard, getSource: () => source,
     setSystemTheme: theme => { systemTheme = theme; if (themeCallback) themeCallback({ theme }) },
     getNavigation: () => navigation, getBackground: () => background,
     timers, tick: milliseconds => { now += milliseconds; for (const callback of timers.values()) callback() },
@@ -562,4 +570,69 @@ test('saved drum meters restore without being forced to four beats', async () =>
     await page.changeSetting('mode', 'drums')
     assert.equal(getSaved().beats, beats)
   }
+})
+
+test('diagnostics repeatedly expands and collapses inside settings without stopping audio', async () => {
+  const { page, getStopCount } = loadPage(false, { seconds: 60 })
+  await initialize(page)
+  await page.generateAndPlay()
+  const stops = getStopCount()
+  await page.openPanel({ currentTarget: { dataset: { panel: 'settings' } } })
+  for (let i = 0; i < 3; i++) {
+    await page.openPanel({ currentTarget: { dataset: { panel: 'diagnostics' } } })
+    assert.equal(page.data.panel, 'diagnostics')
+    await page.openPanel({ currentTarget: { dataset: { panel: 'diagnostics' } } })
+    assert.equal(page.data.panel, 'settings')
+  }
+  assert.equal(page.data.state, 'playing')
+  assert.equal(getStopCount(), stops)
+})
+
+test('manual cleanup removes all runtime files, logs and decoded samples but preserves user input and settings', async () => {
+  const { page, files, directories, nativeFs, getSaved, getClipboard, createPage } = loadPage(false, { seconds: 60, mode: 'drums' })
+  await initialize(page)
+  await page.changeSetting('bpm', 137)
+  await page.changeSetting('themePreference', 'dark')
+  const settings = { ...getSaved() }
+  let reads = 0
+  const readFile = nativeFs.readFile
+  nativeFs.readFile = options => { reads++; readFile(options) }
+  await page.generateAndPlay()
+  assert.equal(reads, 3)
+  assert.ok(page.data.logs.length > 0)
+  directories.add('/user/metronome-probe/cache')
+  directories.add('/user/metronome-probe/cache/empty')
+  files.set('/user/metronome-probe/cache/old.log', Buffer.from('old log'))
+  files.set('/user/metronome-probe/partial.tmp', Buffer.from('partial'))
+  page.inputBpm({ detail: { value: '145' } })
+  await page.stopAndClean()
+  assert.equal(files.size, 0)
+  assert.equal(directories.size, 2)
+  assert.equal(page.data.logs.length, 0)
+  assert.equal(page.data.filePath, '')
+  assert.equal(page.data.progress, 0)
+  assert.equal(page.data.currentBeat, -1)
+  assert.equal(page.data.bpmInput, '145')
+  assert.equal(page.data.bpm, 137)
+  assert.deepEqual({ ...getSaved() }, settings)
+  page.copyDiagnostics()
+  assert.doesNotMatch(getClipboard(), /准备写入|WAV：|beat-.*\.wav/)
+  const next = createPage()
+  await initialize(next)
+  assert.equal(next.data.logs.length, 0)
+  assert.equal(next.data.bpmInput, '145')
+  await next.generateAndPlay()
+  assert.equal(reads, 6, 'decoded samples must be loaded again after cleanup')
+  assert.equal(next.data.state, 'playing')
+})
+
+test('footer year follows local system time when returning to the page', async () => {
+  const { page, tick } = loadPage()
+  tick(new Date(2026, 11, 31, 23, 59, 59).getTime())
+  await initialize(page)
+  assert.equal(page.data.year, 2026)
+  tick(1000)
+  page.onShow()
+  assert.equal(page.data.year, 2027)
+  await new Promise(resolve => setImmediate(resolve))
 })

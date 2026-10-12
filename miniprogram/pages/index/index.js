@@ -96,12 +96,21 @@ async function cleanFiles() {
   session.needsCleanup = true
   update({ cleanupStatus: '正在清理生成文件…' })
   await closeWriter()
-  const { files } = await fileOperation('readdir', { dirPath: directory })
   let failure
-  for (const name of files) {
-    try { await fileOperation('unlink', { filePath: `${directory}/${name}` }) }
-    catch (error) { failure = error }
+  async function emptyDirectory(dirPath) {
+    const { files } = await fileOperation('readdir', { dirPath })
+    for (const name of files) {
+      const path = `${dirPath}/${name}`
+      try {
+        const { stats } = await fileOperation('stat', { path })
+        if (stats.isDirectory()) {
+          await emptyDirectory(path)
+          await fileOperation('rmdir', { dirPath: path })
+        } else await fileOperation('unlink', { filePath: path })
+      } catch (error) { failure = error }
+    }
   }
+  await emptyDirectory(directory)
   await refreshStorage()
   if (failure) throw failure
   const remaining = await fileOperation('readdir', { dirPath: directory })
@@ -134,7 +143,7 @@ Page({
     ...defaults, kits, patterns, kitLabel: kits[0].label, patternLabel: patterns[0].label,
     currentBeat: -1, beatDots: [0, 1, 2, 3], ready: false, busy: false,
     state: 'idle', filePath: '', status: '正在准备…', progress: 0,
-    panel: '', bpmInput: '120', logs: [], theme: 'light', cleanupStatus: '等待清理检查', storageStatus: '等待占用检查'
+    panel: '', bpmInput: '120', logs: [], year: new Date().getFullYear(), theme: 'light', cleanupStatus: '等待清理检查', storageStatus: '等待占用检查'
   },
   onLoad() {
     session.page = this
@@ -222,6 +231,7 @@ Page({
   },
   onShow() {
     session.visible = true
+    update({ year: new Date().getFullYear() })
     applyTheme()
     if (!session.data.busy && !hasActiveAudio()) cleanup()
     else if (['playing', 'paused', 'waiting'].includes(session.data.state)) {
@@ -245,7 +255,8 @@ Page({
     return session.data.state !== 'error'
   },
   async openPanel(event) {
-    const panel = event.currentTarget.dataset.panel
+    const requestedPanel = event.currentTarget.dataset.panel
+    const panel = requestedPanel === 'diagnostics' && session.data.panel === 'diagnostics' ? 'settings' : requestedPanel
     if (!['settings', 'diagnostics'].includes(panel) && !await this.allowEdit()) return
     update({ panel, bpmInput: String(session.data.bpm) })
     if (panel === 'diagnostics') await refreshStorage()
@@ -362,11 +373,13 @@ Page({
   },
   async stopAndClean() {
     if (session.data.busy || !session.data.ready) return
-    update({ busy: true })
+    update({ busy: true, logs: [], progress: 0 })
+    session.samples = {}
+    session.generationCancelled = false
     try {
       session.audio.stop()
       await cleanFiles()
-      update({ state: 'idle', status: '已结束 · 可以调整设置或再次开始' })
+      update({ state: 'idle', status: '已结束 · 可以调整设置或再次开始', cleanupStatus: '音频、日志和运行缓存已全部清理' })
     } catch (error) {
       log(`清理失败：${JSON.stringify({ message: error.message, ...error })}`)
       update({ state: 'error', status: '文件清理失败，请重试', cleanupStatus: '清理失败，重新进入时自动重试，也可手动清理' })
