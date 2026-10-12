@@ -2,6 +2,12 @@ const { SAMPLE_RATE } = require('./wav')
 
 const words = ['one', 'two', 'three', 'four']
 
+function voiceDirectory(tone, bpm) {
+  if (tone !== 'voice-female') return 'voice'
+  const speed = [60, 90, 120, 180, 240].find(value => value >= bpm)
+  return `voice/female/${speed}`
+}
+
 function createVoiceRenderer(bpm, beats, accent, samples) {
   const samplesPerBeat = SAMPLE_RATE * 60 / bpm
   return second => {
@@ -20,4 +26,4 @@ function createVoiceRenderer(bpm, beats, accent, samples) {
   }
 }
 
-module.exports = { words, createVoiceRenderer }
+module.exports = { words, voiceDirectory, createVoiceRenderer }

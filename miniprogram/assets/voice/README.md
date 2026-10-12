@@ -1,30 +1,30 @@
 # 人声报拍采样
 
-- 来源：[A One, A Two](https://freesound.org/people/davidbain/sounds/135648/)，作者 davidbain，2011-11-22 发布。
-- 原站标注 [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)，允许复制、修改与分发。保留此说明以记录来源。
-- 使用原站提供的高质量 MP3 预览，截取末段 One、Two、Three、Four，去掉前导口令，转为单声道 22050 Hz / 16-bit PCM WAV。
-- 每个数字保留音高并加速至约 235 ms，尾部最多保留 240 ms，适配 40–240 BPM；做短淡入淡出和峰值归一化。四个 WAV 随仓库分发，运行时无需网络或语音服务。
-- 按当前拍号循环：2/4 为 One、Two；3/4 增加 Three；4/4 增加 Four。首拍重音开启时，其他拍使用首拍的 80% 音量；关闭时音量相同。
+当前四个报拍来自用户指定的本地文件 `基础节拍器 wav/练习曲（1）伴奏.wav`。提取最开头四个数字，替换此前的 Freesound 英语与日语人声。这里只记录用户提供的来源，不沿用旧素材的 CC0 授权声明。
 
-需要重新制作时，安装 FFmpeg，下载来源文件后运行：
+- 原文件：立体声、48 kHz、24-bit PCM，80 BPM。
+- 截取时间（秒）：One 0–0.240；Two 0.744–0.980；Three 1.497–1.757；Four 2.246–2.513。
+- 转换为单声道 22050 Hz / 16-bit PCM，保留音高；每段最长约 240 ms，做短淡入淡出与峰值归一化，以适配 40–240 BPM。
+- 四个 WAV 随项目提供，播放无需网络。按 2/4、3/4、4/4 循环读到对应拍数；开启首拍重音时，其余拍使用首拍的 80% 音量。
+- 旧日语人声音色已移除；保存过该选项的设备会恢复为当前人声报拍。
+
+重新制作（需要 FFmpeg；传入原始文件路径）：
 
 ```sh
-curl -L --fail 'https://cdn.freesound.org/previews/135/135648_2207512-hq.mp3' -o /tmp/metronome-count.mp3
-python3 scripts/prepare-voice.py /tmp/metronome-count.mp3
+python3 scripts/prepare-voice.py "/path/to/练习曲（1）伴奏.wav"
 ```
 
-脚本生成标准 44 字节 WAV 头，可由项目共用的 PCM 解码器读取。普通电子/柔和音色仍使用原有合成音。
+## 美式英语女声
 
-## 日语女声
+采用用户选定的试听 B：[countdown.wav](https://freesound.org/people/tim.kahn/sounds/82986/)，作者 tim.kahn，授权 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)。小程序“设置与帮助”中保留作者、来源、授权及修改说明。
 
-- 来源：[Chorused Countup- Japanese](https://freesound.org/people/isitlocal/sounds/220213/)，作者 isitlocal，2014-02-22 发布；原站标注 CC0 1.0。作者说明来自 Vocaloid 音色包，带合唱效果，为合成女声。
-- 使用原站高质量 MP3 预览，截取前段四个报数，移除开头与结尾静音。`japanese/one.wav` 至 `four.wav` 对应第 1–4 拍；文件名用于共用报拍逻辑。
-- 与英语组一致，转换为单声道 22050 Hz / 16-bit PCM，保留音高并缩短至约 235 ms、最多 240 ms，做淡入淡出与峰值归一化。
-- 音色选项“人声报拍（日语女声）”使用这一组采样，同样支持拍号、首拍重音、本地记忆与后台整段播放。
+修改：将原倒数录音剪辑、重排为 One、Two、Three、Four，转换为单声道 22050 Hz / 16-bit PCM；调整时长、音量及淡入淡出。截取区间与试听 B 相同：One 10.30–10.88 秒；Two 9.15–9.70 秒；Three 7.95–8.95 秒；Four 6.78–7.60 秒。
+
+`female/60`、`90`、`120`、`180`、`240` 分别提供适配该 BPM 的版本，播放时选择不低于当前 BPM 的最小档位。低速尽量保留原速，只有无法放进单拍的数字才用 FFmpeg `atempo` 保留音高并缩短时长；每段最多占档位拍长的 96%，避免相邻数字重叠。新女声与伴奏文件提取的人声分别缓存、选择和保存。
 
 重新制作：
 
 ```sh
-curl -L --fail 'https://cdn.freesound.org/previews/220/220213_2907755-hq.mp3' -o /tmp/metronome-japanese.mp3
-python3 scripts/prepare-voice.py /tmp/metronome-japanese.mp3 --japanese
+curl -L --fail 'https://cdn.freesound.org/previews/82/82986_7037-hq.mp3' -o /tmp/female-count-b.mp3
+python3 scripts/prepare-female-voice.py /tmp/female-count-b.mp3
 ```

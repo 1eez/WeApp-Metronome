@@ -29,7 +29,7 @@
     <block wx:if="{{mode === 'metronome'}}">
       <view class="option-pair">
         <button class="option" data-panel="beats" bindtap="openPanel" disabled="{{busy}}"><text class="label">拍号</text><text class="value">{{beats}}/4 <text class="chevron">›</text></text></button>
-        <button class="option" data-panel="tone" bindtap="openPanel" disabled="{{busy}}"><text class="label">音色</text><text class="value">{{tone === 'voice-japanese' ? '日语女声' : tone === 'voice' ? '人声' : tone === 'soft' ? '柔和' : '电子'}} <text class="chevron">›</text></text></button>
+        <button class="option" data-panel="tone" bindtap="openPanel" disabled="{{busy}}"><text class="label">音色</text><text class="value">{{tone === 'voice-female' ? '美式女声' : tone === 'voice' ? '人声' : tone === 'soft' ? '柔和' : '电子'}} <text class="chevron">›</text></text></button>
       </view>
       <button class="option full" bindtap="toggleAccent" disabled="{{busy}}"><text class="label">首拍重音</text><text class="toggle {{accent ? 'enabled' : ''}}">{{accent ? '已开启' : '已关闭'}}</text></button>
     </block>
@@ -69,8 +69,8 @@
       <button class="choice {{tone === 'electronic' ? 'selected' : ''}}" data-key="tone" data-value="electronic" bindtap="selectOption">电子 <text wx:if="{{tone === 'electronic'}}">✓</text></button>
       <button class="choice {{tone === 'soft' ? 'selected' : ''}}" data-key="tone" data-value="soft" bindtap="selectOption">柔和 <text wx:if="{{tone === 'soft'}}">✓</text></button>
       <button class="choice {{tone === 'voice' ? 'selected' : ''}}" data-key="tone" data-value="voice" bindtap="selectOption">人声报拍 <text wx:if="{{tone === 'voice'}}">✓</text></button>
-      <button class="choice {{tone === 'voice-japanese' ? 'selected' : ''}}" data-key="tone" data-value="voice-japanese" bindtap="selectOption">人声报拍（日语女声） <text wx:if="{{tone === 'voice-japanese'}}">✓</text></button>
-      <view class="help">人声按拍号循环报数，提供英语与日语女声；开启首拍重音时，第 1 拍更响。音量请使用手机音量键调整。</view>
+      <button class="choice {{tone === 'voice-female' ? 'selected' : ''}}" data-key="tone" data-value="voice-female" bindtap="selectOption">美式英语女声 <text wx:if="{{tone === 'voice-female'}}">✓</text></button>
+      <view class="help">人声按拍号循环报数；开启首拍重音时，第 1 拍更响。音量请使用手机音量键调整。</view>
     </block>
     <block wx:elif="{{panel === 'seconds'}}">
       <button wx:for="{{[60, 300, 600]}}" wx:key="*this" class="choice {{seconds === item ? 'selected' : ''}}" data-key="seconds" data-value="{{item}}" bindtap="selectOption">{{item / 60}} 分钟 <text wx:if="{{seconds === item}}">✓</text></button>
@@ -92,6 +92,7 @@
         <button class="choice {{themePreference === 'system' ? 'selected' : ''}}" data-value="system" bindtap="selectTheme">跟随系统 <text wx:if="{{themePreference === 'system'}}">✓</text></button>
       </view>
       <view class="help">默认跟随系统；切换外观不会中断练习。</view>
+      <view class="help">女声素材：countdown.wav · tim.kahn / Freesound · CC BY 4.0。已剪辑、重排、调整时长与音量。来源：freesound.org/s/82986/；授权：creativecommons.org/licenses/by/4.0/。</view>
       <view class="help">适用于木吉他和电吉他练习。上次设置会保存在本机。</view>
       <view class="help">听到声音后可以锁屏练习。来电、其他音频或强制退出微信可能中断播放。</view>
       <view class="help">圆点的外圈标记当前播放拍，暂停或锁屏时停止动画，回到前台重新对齐。画面仅作辅助，以声音为准。修改参数后，重新开始会按完整时长播放。</view>

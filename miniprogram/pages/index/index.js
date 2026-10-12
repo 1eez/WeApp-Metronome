@@ -1,6 +1,6 @@
 const { SAMPLE_RATE, createHeader, createSecond, decodeSample } = require('../../utils/wav')
 const { kits, patterns, createDrumRenderer } = require('../../utils/drums')
-const { words, createVoiceRenderer } = require('../../utils/voice')
+const { words, voiceDirectory, createVoiceRenderer } = require('../../utils/voice')
 const fs = wx.getFileSystemManager()
 const directory = `${wx.env.USER_DATA_PATH}/metronome-probe`
 const storageKey = 'metronome-settings'
@@ -159,7 +159,7 @@ Page({
         bpm: Number.isInteger(saved.bpm) && saved.bpm >= 40 && saved.bpm <= 240 ? saved.bpm : defaults.bpm,
         beats: [2, 3, 4].includes(saved.beats) ? saved.beats : defaults.beats,
         accent: typeof saved.accent === 'boolean' ? saved.accent : defaults.accent,
-        tone: ['electronic', 'soft', 'voice', 'voice-japanese'].includes(saved.tone) ? saved.tone : defaults.tone,
+        tone: saved.tone === 'voice-japanese' ? 'voice' : ['electronic', 'soft', 'voice', 'voice-female'].includes(saved.tone) ? saved.tone : defaults.tone,
         seconds: [60, 300, 600].includes(saved.seconds) ? saved.seconds : defaults.seconds,
         mode: saved.mode === 'drums' ? 'drums' : 'metronome',
         kit: kits.some(item => item.id === saved.kit) ? saved.kit : defaults.kit,
@@ -319,16 +319,17 @@ Page({
       session.audio.stop()
       await cleanFiles()
       let renderSecond = second => createSecond(second, { bpm, beats, accent, tone })
-      if (mode === 'metronome' && ['voice', 'voice-japanese'].includes(tone)) {
-        if (!session.samples[tone]) {
+      if (mode === 'metronome' && ['voice', 'voice-female'].includes(tone)) {
+        const sampleDirectory = voiceDirectory(tone, bpm)
+        if (!session.samples[sampleDirectory]) {
           const entries = await Promise.all(words.map(async word => {
-            const { data } = await fileOperation('readFile', { filePath: `assets/voice/${tone === 'voice-japanese' ? 'japanese/' : ''}${word}.wav` })
+            const { data } = await fileOperation('readFile', { filePath: `assets/${sampleDirectory}/${word}.wav` })
             return [word, decodeSample(data)]
           }))
-          session.samples[tone] = {}
-          for (const [word, sample] of entries) session.samples[tone][word] = sample
+          session.samples[sampleDirectory] = {}
+          for (const [word, sample] of entries) session.samples[sampleDirectory][word] = sample
         }
-        renderSecond = createVoiceRenderer(bpm, beats, accent, session.samples[tone])
+        renderSecond = createVoiceRenderer(bpm, beats, accent, session.samples[sampleDirectory])
       }
       if (mode === 'drums') {
         if (!session.samples[kit]) {
@@ -359,7 +360,7 @@ Page({
       await refreshStorage()
       log(`WAV：${info.stats.size} 字节，${bpm} BPM，${beats}/4，${seconds} 秒`)
       session.audio.title = `${mode === 'drums' ? session.data.patternLabel : '节拍器'} · ${bpm} BPM · ${beats}/4`
-      session.audio.singer = mode === 'drums' ? session.data.kitLabel : tone === 'voice-japanese' ? '人声报拍（日语女声）' : tone === 'voice' ? '人声报拍' : tone === 'soft' ? '柔和提示音' : '电子提示音'
+      session.audio.singer = mode === 'drums' ? session.data.kitLabel : tone === 'voice-female' ? '美式英语女声' : tone === 'voice' ? '人声报拍' : tone === 'soft' ? '柔和提示音' : '电子提示音'
       session.audio.epname = '吉他练习'
       session.audio.startTime = 0
       session.audio.playbackRate = 1

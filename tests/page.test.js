@@ -637,7 +637,7 @@ test('footer year follows local system time when returning to the page', async (
   await new Promise(resolve => setImmediate(resolve))
 })
 
-for (const tone of ['voice', 'voice-japanese']) {
+for (const tone of ['voice', 'voice-female']) {
   test(`${tone}: selection restores and renders across pause and resume`, async () => {
     const { page, audio, files, getSource, getSaved } = loadPage(false, { seconds: 60, beats: 3, tone })
     await initialize(page)
@@ -646,12 +646,12 @@ for (const tone of ['voice', 'voice-japanese']) {
     assert.equal(getSaved().tone, tone)
     await page.generateAndPlay()
     assert.equal(page.data.state, 'playing')
-    assert.equal(audio.singer, tone === 'voice-japanese' ? '人声报拍（日语女声）' : '人声报拍')
-    const { createVoiceRenderer, words } = require('../miniprogram/utils/voice')
+    assert.equal(audio.singer, tone === 'voice-female' ? '美式英语女声' : '人声报拍')
+    const { createVoiceRenderer, words, voiceDirectory } = require('../miniprogram/utils/voice')
     const { decodeSample } = require('../miniprogram/utils/wav')
     const samples = {}
     for (const word of words) {
-      const file = fs.readFileSync(path.join(__dirname, '../miniprogram/assets/voice', tone === 'voice-japanese' ? 'japanese' : '', word + '.wav'))
+      const file = fs.readFileSync(path.join(__dirname, '../miniprogram/assets', voiceDirectory(tone, 120), word + '.wav'))
       samples[word] = decodeSample(file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength))
     }
     const render = createVoiceRenderer(120, 3, false, samples)
@@ -677,24 +677,28 @@ for (const tone of ['voice', 'voice-japanese']) {
     assert.equal(page.data.state, 'playing')
   })
 }
-
-test('switching voice sets loads separate samples and saves the new choice', async () => {
-  const { page, nativeFs, getSaved, setConfirm, files, getSource } = loadPage(false, { seconds: 60, tone: 'voice' })
+test('retired Japanese voice selection restores as the replacement voice', async () => {
+  const { page, getSaved } = loadPage(false, { seconds: 60, tone: 'voice-japanese' })
   await initialize(page)
-  const paths = []
-  const read = nativeFs.readFile
-  nativeFs.readFile = options => { paths.push(options.filePath); read(options) }
-  await page.generateAndPlay()
-  const english = Buffer.from(files.get(getSource()).subarray(44, 44144))
-  setConfirm(true)
-  await page.changeSetting('tone', 'voice-japanese')
+  assert.equal(page.data.tone, 'voice')
+  await page.changeSetting('accent', false)
+  assert.equal(getSaved().tone, 'voice')
   await page.generateAndPlay()
   assert.equal(page.data.state, 'playing')
-  assert.equal(getSaved().tone, 'voice-japanese')
-  assert.equal(paths.filter(path => path.startsWith('assets/voice/japanese/')).length, 4)
-  assert.notDeepEqual(files.get(getSource()).subarray(44, 44144), english)
+})
+
+test('switching between backing-track voice and female voice loads distinct samples', async () => {
+  const { page, files, getSource, getSaved, setConfirm } = loadPage(false, { seconds: 60, tone: 'voice' })
+  await initialize(page)
+  await page.generateAndPlay()
+  const original = Buffer.from(files.get(getSource()).subarray(44, 44144))
+  setConfirm(true)
+  await page.changeSetting('tone', 'voice-female')
+  await page.generateAndPlay()
+  assert.equal(page.data.state, 'playing')
+  assert.equal(getSaved().tone, 'voice-female')
+  assert.notDeepEqual(files.get(getSource()).subarray(44, 44144), original)
   await page.changeSetting('tone', 'voice')
   await page.generateAndPlay()
-  assert.equal(paths.length, 12, 'ending a session clears samples; switching back reloads English')
-  assert.deepEqual(files.get(getSource()).subarray(44, 44144), english)
+  assert.deepEqual(files.get(getSource()).subarray(44, 44144), original)
 })

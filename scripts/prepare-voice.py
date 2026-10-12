@@ -1,4 +1,4 @@
-"""Prepare English or Japanese CC0 count samples listed in assets/voice/README.md."""
+"""Extract the four opening count-in words from the user-provided practice backing track."""
 import argparse
 import array
 from pathlib import Path
@@ -8,17 +8,12 @@ import wave
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('source', type=Path)
-parser.add_argument('--japanese', action='store_true')
 args = parser.parse_args()
 source = args.source
 destination = Path(__file__).resolve().parents[1] / 'miniprogram/assets/voice'
-# Use the final count; exclude the introductory "A One, A Two, A".
-segments = [('one', 1.365, 1.775), ('two', 1.780, 2.080),
-            ('three', 2.110, 2.390), ('four', 2.455, 2.790)]
-if args.japanese:
-    destination /= 'japanese'
-    segments = [('one', 0.275, 0.615), ('two', 0.660, 1.005),
-                ('three', 1.035, 1.355), ('four', 1.380, 1.730)]
+# The source count-in is at 80 BPM; keep only the opening four words.
+segments = [('one', 0.000, 0.240), ('two', 0.744, 0.980),
+            ('three', 1.497, 1.757), ('four', 2.246, 2.513)]
 destination.mkdir(parents=True, exist_ok=True)
 for name, start, end in segments:
     # Keep pitch while shortening words to fit even the fastest supported beat (240 BPM).
