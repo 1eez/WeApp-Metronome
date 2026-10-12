@@ -1,0 +1,17 @@
+<view class="page">
+  <view class="title">本地 WAV → 后台播放器</view>
+  <view class="description">120 BPM · 4/4 · 第一拍高音重音</view>
+  <view class="description">纯前端合成，不下载、不上传音频。</view>
+
+  <picker range="{{durations}}" range-key="label" value="{{durationIndex}}" bindchange="changeDuration" disabled="{{busy || active}}">
+    <view class="picker">验证时长：{{durations[durationIndex].label}} ▾</view>
+  </picker>
+  <button type="primary" bindtap="generateAndPlay" disabled="{{busy || active || !ready}}">生成本地文件并尝试后台播放</button>
+  <button bindtap="stopAndClean" disabled="{{busy || !ready}}">停止并清理文件</button>
+
+  <view class="status">{{status}}</view>
+  <view wx:if="{{filePath}}" class="path">{{filePath}}</view>
+  <view class="hint">听到声音后锁屏。1 分钟用于确认能否播放；10 分钟用于检查持续播放。播放结束后请回到此页清理文件。</view>
+  <view class="hint">锁屏时界面与日志可能暂停更新，不能用日志时间判断节拍精度。来电、其他音频和强制退出微信可能中断播放。</view>
+  <view class="log" wx:for="{{logs}}" wx:key="id">{{item.text}}</view>
+</view>

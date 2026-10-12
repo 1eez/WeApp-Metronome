@@ -1,0 +1,11 @@
+{
+  "appid": "wx39b7134827b827f8",
+  "projectname": "metronome-audio-probe",
+  "compileType": "miniprogram",
+  "miniprogramRoot": "miniprogram/",
+  "setting": {
+    "es6": true,
+    "enhance": true,
+    "minified": true
+  }
+}
