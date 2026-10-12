@@ -46,4 +46,14 @@ function createSecond(second, { bpm = BPM, beats = 4, accent = true, tone = 'ele
   return buffer
 }
 
-module.exports = { SAMPLE_RATE, BPM, createHeader, createSecond }
+function decodeSample(buffer) {
+  const view = new DataView(buffer)
+  // Bundled samples use a standard 44-byte PCM header.
+  if (view.getUint16(20, true) !== 1 || view.getUint16(22, true) !== 1 || view.getUint32(24, true) !== SAMPLE_RATE || view.getUint16(34, true) !== 16) throw new Error('采样格式不正确')
+  const length = view.getUint32(40, true) / 2
+  const result = new Float32Array(length)
+  for (let i = 0; i < length; i++) result[i] = view.getInt16(44 + i * 2, true) / 32768
+  return result
+}
+
+module.exports = { SAMPLE_RATE, BPM, createHeader, createSecond, decodeSample }

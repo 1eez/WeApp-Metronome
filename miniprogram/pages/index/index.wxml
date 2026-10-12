@@ -29,7 +29,7 @@
     <block wx:if="{{mode === 'metronome'}}">
       <view class="option-pair">
         <button class="option" data-panel="beats" bindtap="openPanel" disabled="{{busy}}"><text class="label">拍号</text><text class="value">{{beats}}/4 <text class="chevron">›</text></text></button>
-        <button class="option" data-panel="tone" bindtap="openPanel" disabled="{{busy}}"><text class="label">音色</text><text class="value">{{tone === 'soft' ? '柔和' : '电子'}} <text class="chevron">›</text></text></button>
+        <button class="option" data-panel="tone" bindtap="openPanel" disabled="{{busy}}"><text class="label">音色</text><text class="value">{{tone === 'voice-japanese' ? '日语女声' : tone === 'voice' ? '人声' : tone === 'soft' ? '柔和' : '电子'}} <text class="chevron">›</text></text></button>
       </view>
       <button class="option full" bindtap="toggleAccent" disabled="{{busy}}"><text class="label">首拍重音</text><text class="toggle {{accent ? 'enabled' : ''}}">{{accent ? '已开启' : '已关闭'}}</text></button>
     </block>
@@ -68,7 +68,9 @@
     <block wx:elif="{{panel === 'tone'}}">
       <button class="choice {{tone === 'electronic' ? 'selected' : ''}}" data-key="tone" data-value="electronic" bindtap="selectOption">电子 <text wx:if="{{tone === 'electronic'}}">✓</text></button>
       <button class="choice {{tone === 'soft' ? 'selected' : ''}}" data-key="tone" data-value="soft" bindtap="selectOption">柔和 <text wx:if="{{tone === 'soft'}}">✓</text></button>
-      <view class="help">两种音色均为提示音。音量请使用手机音量键调整。</view>
+      <button class="choice {{tone === 'voice' ? 'selected' : ''}}" data-key="tone" data-value="voice" bindtap="selectOption">人声报拍 <text wx:if="{{tone === 'voice'}}">✓</text></button>
+      <button class="choice {{tone === 'voice-japanese' ? 'selected' : ''}}" data-key="tone" data-value="voice-japanese" bindtap="selectOption">人声报拍（日语女声） <text wx:if="{{tone === 'voice-japanese'}}">✓</text></button>
+      <view class="help">人声按拍号循环报数，提供英语与日语女声；开启首拍重音时，第 1 拍更响。音量请使用手机音量键调整。</view>
     </block>
     <block wx:elif="{{panel === 'seconds'}}">
       <button wx:for="{{[60, 300, 600]}}" wx:key="*this" class="choice {{seconds === item ? 'selected' : ''}}" data-key="seconds" data-value="{{item}}" bindtap="selectOption">{{item / 60}} 分钟 <text wx:if="{{seconds === item}}">✓</text></button>
